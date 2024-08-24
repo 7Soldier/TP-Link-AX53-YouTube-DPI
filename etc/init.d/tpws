@@ -1,0 +1,58 @@
+#!/bin/sh /etc/rc.common
+
+PROG=/usr/sbin/tpws
+PIDFILE=/var/run/tpws.pid
+ARGS="--daemon --hostlist=/etc/tpws/user.list --bind-addr 192.168.0.1 --port 1080 --disorder --tlsrec=sni --split-http-req=method --split-pos=2 --pidfile $PIDFILE"
+START=99
+
+start() {
+  if [ -f $PIDFILE ] && kill -0 $(cat $PIDFILE); then
+    echo 'Service TPWS is already running' >&2
+    return 1
+  fi
+  SERVICE_PID_FILE=$PIDFILE service_start $PROG $ARGS
+  iptables -t nat -A prerouting_rule_http -i br-lan -p tcp -m tcp ! -s 192.168.0.1 ! -d 192.168.0.1 --dport 80 -j REDIRECT --to-port 1080
+  iptables -t nat -A prerouting_rule_http -i br-lan -p udp -m udp ! -s 192.168.0.1 ! -d 192.168.0.1 --dport 80 -j REDIRECT --to-port 1080
+  iptables -t nat -A prerouting_rule_https -i br-lan -p tcp -m tcp ! -s 192.168.0.1 ! -d 192.168.0.1 --dport 443 -j REDIRECT --to-port 1080
+  iptables -t nat -A prerouting_rule_https -i br-lan -p udp -m udp ! -s 192.168.0.1 ! -d 192.168.0.1 --dport 443 -j REDIRECT --to-port 1080
+  echo 'Started TPWS service'
+}
+
+stop() {
+  if [ ! -f "$PIDFILE" ] || ! kill -0 $(cat "$PIDFILE"); then
+    echo 'Service TPWS is not running' >&2
+    return 1
+  fi
+  echo 'Stopping TPWS service...'
+  SERVICE_PID_FILE=$PIDFILE service_stop $PROG && rm -f $PIDFILE
+  iptables -t nat -D prerouting_rule_http -i br-lan -p tcp -m tcp ! -s 192.168.0.1 ! -d 192.168.0.1 --dport 80 -j REDIRECT --to-port 1080
+  iptables -t nat -D prerouting_rule_http -i br-lan -p udp -m udp ! -s 192.168.0.1 ! -d 192.168.0.1 --dport 80 -j REDIRECT --to-port 1080
+  iptables -t nat -D prerouting_rule_https -i br-lan -p tcp -m tcp ! -s 192.168.0.1 ! -d 192.168.0.1 --dport 443 -j REDIRECT --to-port 1080
+  iptables -t nat -D prerouting_rule_https -i br-lan -p udp -m udp ! -s 192.168.0.1 ! -d 192.168.0.1 --dport 443 -j REDIRECT --to-port 1080
+}
+
+status() {
+  if [ -f $PIDFILE ] && kill -0 $(cat $PIDFILE); then
+    echo 'Service TPWS is running'
+  else
+    echo 'Service TPWS is stopped'
+  fi
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  status)
+    status
+    ;;
+  restart)
+    stop
+    start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status}"
+esac
